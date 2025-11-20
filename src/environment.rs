@@ -10,7 +10,7 @@ use crate::manifest::Manifest;
 const PROFILE_DIR: &str = ".macdev/profile";
 
 /// Parse package spec (e.g., "python@3.11" -> ("python@3.11", "3.11"))
-fn parse_package_spec(spec: &str) -> (String, Option<String>) {
+pub fn parse_package_spec(spec: &str) -> (String, Option<String>) {
     if let Some(pos) = spec.rfind('@') {
         let name = spec[..pos].to_string();
         let version = spec[pos + 1..].to_string();

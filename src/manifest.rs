@@ -222,10 +222,16 @@ pub struct LockMetadata {
     pub macdev_version: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LockedPackage {
     pub version: String,
     pub formula: String,
+}
+
+impl Default for Lock {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Lock {
