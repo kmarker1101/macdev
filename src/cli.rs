@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Parser)]
 #[command(name = "macdev")]
@@ -69,6 +70,12 @@ enum Commands {
         /// Tap name (e.g., homebrew/cask)
         tap: String,
     },
+
+    /// Generate shell completion script
+    Completion {
+        /// Shell to generate completions for
+        shell: Shell,
+    },
 }
 
 impl Cli {
@@ -100,6 +107,20 @@ impl Cli {
             Commands::Upgrade { package } => crate::environment::upgrade(package.as_deref()),
             Commands::Tap { tap } => crate::environment::tap(&tap),
             Commands::Untap { tap } => crate::environment::untap(&tap),
+            Commands::Completion { shell } => {
+                Self::generate_completion(shell);
+                Ok(())
+            }
         }
+    }
+
+    fn generate_completion(shell: Shell) {
+        use clap::CommandFactory;
+        use clap_complete::generate;
+        use std::io;
+
+        let mut cmd = Self::command();
+        let bin_name = cmd.get_name().to_string();
+        generate(shell, &mut cmd, bin_name, &mut io::stdout());
     }
 }
