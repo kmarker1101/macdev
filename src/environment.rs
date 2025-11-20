@@ -80,10 +80,18 @@ pub fn add(package_spec: &str, impure: bool) -> Result<()> {
     if !deps.is_empty() {
         println!("  Checking dependencies...");
         for dep in deps {
-            // Check if dependency is in manifest (pure or impure)
-            if !global_manifest.packages.contains_key(&dep) &&
-               !global_manifest.impure.contains_key(&dep) &&
-               !global_manifest.gc.contains_key(&dep) {
+            // Extract base name (e.g., "python@3.14" -> "python")
+            let dep_base = dep.split('@').next().unwrap();
+
+            // Check if dependency (or its base name) is in manifest (pure or impure)
+            let in_packages = global_manifest.packages.contains_key(&dep) ||
+                             global_manifest.packages.contains_key(dep_base);
+            let in_impure = global_manifest.impure.contains_key(&dep) ||
+                           global_manifest.impure.contains_key(dep_base);
+            let in_gc = global_manifest.gc.contains_key(&dep) ||
+                       global_manifest.gc.contains_key(dep_base);
+
+            if !in_packages && !in_impure && !in_gc {
                 println!("    Unlinking {} (dependency)", dep);
                 let _ = homebrew::unlink_package(&dep); // Ignore errors
             }
@@ -97,30 +105,68 @@ pub fn add(package_spec: &str, impure: bool) -> Result<()> {
 pub fn remove(package: &str) -> Result<()> {
     use colored::*;
 
+    // Extract base name (e.g., "python@3.12" -> "python")
+    let package_base = package.split('@').next().unwrap();
+
     // Try to load local manifest (ok if it doesn't exist - not in a project)
     let local_manifest = Manifest::load().ok();
     let mut global_manifest = Manifest::load_global()?;
 
-    // Check if package exists in global manifest
-    let is_global_pure = global_manifest.packages.contains_key(package);
-    let is_global_impure = global_manifest.impure.contains_key(package);
+    // Determine which section the package is in (prioritize specific matches)
+    let has_version = package.contains('@');
 
-    if !is_global_pure && !is_global_impure {
+    // Check for exact matches first
+    let exact_pure = global_manifest.packages.contains_key(package);
+    let exact_impure = global_manifest.impure.contains_key(package);
+
+    // Check for base name matches
+    let base_pure = global_manifest.packages.contains_key(package_base);
+    let base_impure = global_manifest.impure.contains_key(package_base);
+
+    // Decide which section to remove from:
+    // 1. If versioned (e.g., node@22), prefer pure packages
+    // 2. If exact match exists, use that section
+    // 3. Otherwise use base match
+    let is_impure = if has_version {
+        // For versioned packages, only remove from impure if exact match or no pure match
+        exact_impure || (!exact_pure && !base_pure && base_impure)
+    } else {
+        // For unversioned, prefer exact match, then base match
+        exact_impure || (!exact_pure && base_impure)
+    };
+
+    if !exact_pure && !exact_impure && !base_pure && !base_impure {
         anyhow::bail!("Package '{}' is not tracked globally", package);
     }
 
     println!("{} {} from environment", "Removing".yellow(), package);
 
-    if is_global_impure {
+    if is_impure {
         // Impure package: move to gc section in global manifest
-        global_manifest.impure.remove(package);
-        global_manifest.gc.insert(package.to_string(), "*".to_string());
-        global_manifest.save_global()?;
-        println!("{} Removed {} (impure, moved to gc)", "✓".green(), package);
+        // Try both full name and base name
+        let removed = global_manifest.impure.remove(package).is_some() ||
+                     global_manifest.impure.remove(package_base).is_some();
+        if removed {
+            // For impure packages, use the original package name (may include version)
+            let gc_key = if package.contains('@') {
+                package.to_string()
+            } else {
+                package_base.to_string()
+            };
+            global_manifest.gc.insert(gc_key, "*".to_string());
+            global_manifest.save_global()?;
+            println!("{} Removed {} (impure, moved to gc)", "✓".green(), package);
+        }
     } else {
         // Pure package: remove from local if in a project, move to gc in global
-        if let Some(mut local) = local_manifest && local.packages.contains_key(package) {
-            local.remove_package(package);
+        let pkg_key = if local_manifest.as_ref().map_or(false, |m| m.packages.contains_key(package)) {
+            package
+        } else {
+            package_base
+        };
+
+        if let Some(mut local) = local_manifest && local.packages.contains_key(pkg_key) {
+            local.remove_package(pkg_key);
             local.save()?;
 
             // Rebuild profile (removes symlinks for pure packages)
@@ -129,8 +175,17 @@ pub fn remove(package: &str) -> Result<()> {
         }
 
         // Move from packages to gc in global manifest
-        if let Some(version) = global_manifest.packages.remove(package) {
-            global_manifest.gc.insert(package.to_string(), version);
+        // Try both full name and base name
+        let version = global_manifest.packages.remove(package)
+                        .or_else(|| global_manifest.packages.remove(package_base));
+        if let Some(ver) = version {
+            // Store full package spec (name@version) in gc, not just base name
+            let gc_key = if ver == "*" {
+                package_base.to_string()
+            } else {
+                format!("{}@{}", package_base, ver)
+            };
+            global_manifest.gc.insert(gc_key, ver);
         }
         global_manifest.save_global()?;
 
@@ -218,6 +273,51 @@ pub fn sync() -> Result<()> {
         println!("{} Synced {} item(s)", "✓".green(), synced_count);
     } else {
         println!("{}", "All items already synced".yellow());
+    }
+
+    Ok(())
+}
+
+/// Check if environment is properly set up
+pub fn check(quiet: bool) -> Result<()> {
+    // Check if manifest exists
+    if !Manifest::exists() {
+        if !quiet {
+            eprintln!("No manifest found. Run 'macdev init' first.");
+        }
+        std::process::exit(1);
+    }
+
+    let local_manifest = Manifest::load()?;
+    let global_manifest = Manifest::load_global()?;
+
+    // Check if all local packages are in global manifest (installed)
+    let mut missing = Vec::new();
+    for (name, _version) in &local_manifest.packages {
+        if !global_manifest.packages.contains_key(name) {
+            missing.push(name.clone());
+        }
+    }
+
+    if !missing.is_empty() {
+        if !quiet {
+            eprintln!("Missing packages: {}", missing.join(", "));
+            eprintln!("Run 'macdev install' to set up.");
+        }
+        std::process::exit(1);
+    }
+
+    // Check if profile directory exists
+    let profile_bin = PathBuf::from(".macdev/profile/bin");
+    if !profile_bin.exists() || fs::read_dir(&profile_bin)?.next().is_none() {
+        if !quiet {
+            eprintln!("Profile directory empty. Run 'macdev install'.");
+        }
+        std::process::exit(1);
+    }
+
+    if !quiet {
+        println!("Environment is set up");
     }
 
     Ok(())
@@ -311,7 +411,7 @@ pub fn install() -> Result<()> {
 }
 
 /// Create symlinks for a package
-fn create_symlinks(_package: &str, brew_path: &Path) -> Result<()> {
+fn create_symlinks(package: &str, brew_path: &Path) -> Result<()> {
     let profile_dir = PathBuf::from(PROFILE_DIR);
     fs::create_dir_all(&profile_dir)?;
 
@@ -332,6 +432,72 @@ fn create_symlinks(_package: &str, brew_path: &Path) -> Result<()> {
     if brew_lib.exists() {
         link_directory(&brew_lib, &profile_dir.join("lib"))?;
     }
+
+    // Special handling for Python: create virtual environment
+    if package.starts_with("python") {
+        setup_python_venv(package)?;
+    }
+
+    Ok(())
+}
+
+/// Set up Python virtual environment for isolated package management
+fn setup_python_venv(package: &str) -> Result<()> {
+    use colored::*;
+    use std::process::Command;
+
+    let venv_dir = PathBuf::from(".macdev/venv");
+
+    // Skip if venv already exists
+    if venv_dir.exists() {
+        println!("  {} Python venv already exists", "✓".green());
+        return Ok(());
+    }
+
+    println!("  {} Creating Python virtual environment...", "→".blue());
+
+    // Get python3 from the profile
+    let python_bin = PathBuf::from(".macdev/profile/bin/python3");
+    if !python_bin.exists() {
+        anyhow::bail!("Python binary not found in profile");
+    }
+
+    // Create venv
+    let status = Command::new(&python_bin)
+        .args(["-m", "venv", ".macdev/venv"])
+        .status()
+        .context("Failed to create virtual environment")?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to create Python virtual environment");
+    }
+
+    println!("  {} Python venv created at .macdev/venv", "✓".green());
+    println!();
+    println!("  {} To activate, update your direnv config:", "ℹ".cyan());
+    println!("    Add this to ~/.config/direnv/direnvrc:");
+    println!();
+    println!("    use_macdev() {{");
+    println!("      if [[ ! -d .macdev ]]; then");
+    println!("        log_error \"No .macdev directory found. Run 'macdev init' first.\"");
+    println!("        return 1");
+    println!("      fi");
+    println!();
+    println!("      if [[ ! -d .macdev/profile/bin ]] || [[ -z \"$(ls -A .macdev/profile/bin 2>/dev/null)\" ]]; then");
+    println!("        log_status \"Setting up macdev environment...\"");
+    println!("        macdev install");
+    println!("      fi");
+    println!();
+    println!("      PATH_add .macdev/profile/bin");
+    println!();
+    println!("      # Activate Python venv if it exists");
+    println!("      if [[ -f .macdev/venv/bin/activate ]]; then");
+    println!("        source .macdev/venv/bin/activate");
+    println!("      fi");
+    println!();
+    println!("      export MACDEV_ACTIVE=1");
+    println!("    }}");
+    println!();
 
     Ok(())
 }

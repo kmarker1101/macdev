@@ -45,6 +45,13 @@ enum Commands {
     /// Garbage collect unused packages
     Gc,
 
+    /// Check if environment needs setup (exits 1 if install needed)
+    Check {
+        /// Suppress output
+        #[arg(long)]
+        quiet: bool,
+    },
+
     /// Add a Homebrew tap
     Tap {
         /// Tap name (e.g., homebrew/cask)
@@ -83,6 +90,7 @@ impl Cli {
             Commands::List => crate::manifest::list(),
             Commands::Sync => crate::environment::sync(),
             Commands::Gc => crate::environment::gc(),
+            Commands::Check { quiet } => crate::environment::check(quiet),
             Commands::Tap { tap } => crate::environment::tap(&tap),
             Commands::Untap { tap } => crate::environment::untap(&tap),
         }
