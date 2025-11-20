@@ -52,6 +52,12 @@ enum Commands {
         quiet: bool,
     },
 
+    /// Upgrade packages
+    Upgrade {
+        /// Package to upgrade (upgrades all if not specified)
+        package: Option<String>,
+    },
+
     /// Add a Homebrew tap
     Tap {
         /// Tap name (e.g., homebrew/cask)
@@ -91,6 +97,7 @@ impl Cli {
             Commands::Sync => crate::environment::sync(),
             Commands::Gc => crate::environment::gc(),
             Commands::Check { quiet } => crate::environment::check(quiet),
+            Commands::Upgrade { package } => crate::environment::upgrade(package.as_deref()),
             Commands::Tap { tap } => crate::environment::tap(&tap),
             Commands::Untap { tap } => crate::environment::untap(&tap),
         }

@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const MANIFEST_FILE: &str = ".macdev/manifest.toml";
+const LOCK_FILE: &str = ".macdev/manifest.lock";
 
 fn global_manifest_path() -> Result<PathBuf> {
     let home = dirs::home_dir().context("Could not find home directory")?;
@@ -200,5 +201,136 @@ pub fn list() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+// Lock file structures
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Lock {
+    pub metadata: LockMetadata,
+    pub packages: HashMap<String, LockedPackage>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub dependencies: HashMap<String, LockedPackage>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub impure: HashMap<String, LockedPackage>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LockMetadata {
+    pub generated: String,
+    pub macdev_version: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LockedPackage {
+    pub version: String,
+    pub formula: String,
+}
+
+impl Lock {
+    /// Load lock file from current directory
+    pub fn load() -> Result<Self> {
+        let path = PathBuf::from(LOCK_FILE);
+
+        if !path.exists() {
+            anyhow::bail!("No lock file found");
+        }
+
+        let contents = fs::read_to_string(&path)
+            .context("Failed to read lock file")?;
+
+        let lock: Lock = toml::from_str(&contents)
+            .context("Failed to parse lock file")?;
+
+        Ok(lock)
+    }
+
+    /// Check if lock file exists
+    pub fn exists() -> bool {
+        Path::new(LOCK_FILE).exists()
+    }
+
+    /// Save lock file
+    pub fn save(&self) -> Result<()> {
+        let dir = Path::new(".macdev");
+        fs::create_dir_all(dir)?;
+
+        let contents = toml::to_string_pretty(self)
+            .context("Failed to serialize lock file")?;
+
+        fs::write(LOCK_FILE, contents)
+            .context("Failed to write lock file")?;
+
+        Ok(())
+    }
+
+    /// Create new empty lock
+    pub fn new() -> Self {
+        Lock {
+            metadata: LockMetadata {
+                generated: chrono::Utc::now().to_rfc3339(),
+                macdev_version: env!("CARGO_PKG_VERSION").to_string(),
+            },
+            packages: HashMap::new(),
+            dependencies: HashMap::new(),
+            impure: HashMap::new(),
+        }
+    }
+
+    /// Add a package to the lock
+    pub fn add_package(&mut self, name: String, version: String, formula: String) {
+        self.packages.insert(name, LockedPackage { version, formula });
+    }
+
+    /// Add a dependency to the lock
+    pub fn add_dependency(&mut self, package: String, dep: String, version: String, formula: String) {
+        let key = format!("{}:{}", package, dep);
+        self.dependencies.insert(key, LockedPackage { version, formula });
+    }
+}
+
+/// Generate lock file from current local manifest (project-specific only)
+pub fn generate_lock() -> Result<()> {
+    use crate::homebrew;
+    use colored::*;
+
+    // Only lock packages from LOCAL manifest (project-specific)
+    // Do not lock global/impure packages (those are personal system tools)
+    let local_manifest = Manifest::load()?;
+
+    if local_manifest.packages.is_empty() {
+        return Ok(());
+    }
+
+    println!("  {} Generating lock file...", "→".blue());
+    let mut lock = Lock::new();
+
+    // Lock all pure packages from this project and their dependencies
+    for name in local_manifest.packages.keys() {
+        // Get package info
+        let info = homebrew::package_info(name)?;
+        lock.add_package(name.clone(), info.version.clone(), info.formula);
+        println!("    Locked {} @ {}", name, info.version);
+
+        // Get and lock dependencies
+        let deps = homebrew::package_deps(name)?;
+        if !deps.is_empty() {
+            println!("      Locking {} dependencies...", deps.len());
+            for dep in deps {
+                if let Ok(dep_info) = homebrew::package_info(&dep) {
+                    lock.add_dependency(
+                        name.clone(),
+                        dep,
+                        dep_info.version,
+                        dep_info.formula,
+                    );
+                }
+            }
+        }
+    }
+
+    lock.save()?;
+    println!("  {} Lock file saved", "✓".green());
     Ok(())
 }

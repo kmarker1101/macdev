@@ -98,6 +98,9 @@ pub fn add(package_spec: &str, impure: bool) -> Result<()> {
         }
     }
 
+    // Generate lock file
+    let _ = crate::manifest::generate_lock(); // Ignore errors
+
     Ok(())
 }
 
@@ -159,7 +162,7 @@ pub fn remove(package: &str) -> Result<()> {
         }
     } else {
         // Pure package: remove from local if in a project, move to gc in global
-        let pkg_key = if local_manifest.as_ref().map_or(false, |m| m.packages.contains_key(package)) {
+        let pkg_key = if local_manifest.as_ref().is_some_and(|m| m.packages.contains_key(package)) {
             package
         } else {
             package_base
@@ -191,6 +194,9 @@ pub fn remove(package: &str) -> Result<()> {
 
         println!("{} Removed {} (moved to gc)", "✓".green(), package);
     }
+
+    // Update lock file
+    let _ = crate::manifest::generate_lock(); // Ignore errors
 
     Ok(())
 }
@@ -293,7 +299,7 @@ pub fn check(quiet: bool) -> Result<()> {
 
     // Check if all local packages are in global manifest (installed)
     let mut missing = Vec::new();
-    for (name, _version) in &local_manifest.packages {
+    for name in local_manifest.packages.keys() {
         if !global_manifest.packages.contains_key(name) {
             missing.push(name.clone());
         }
@@ -372,27 +378,191 @@ pub fn gc() -> Result<()> {
 
     println!("{}", "✓ Garbage collection complete".green());
 
+    // Update lock file
+    let _ = crate::manifest::generate_lock(); // Ignore errors
+
+    Ok(())
+}
+
+/// Upgrade packages
+pub fn upgrade(package: Option<&str>) -> Result<()> {
+    use colored::*;
+    use std::process::Command;
+
+    // Load manifests to know which packages are managed
+    let local_manifest = Manifest::load().ok();
+    let global_manifest = Manifest::load_global()?;
+
+    if let Some(pkg) = package {
+        // Upgrade specific package
+        println!("{} {}", "Upgrading".cyan(), pkg);
+
+        // Check if package is managed
+        let pkg_base = pkg.split('@').next().unwrap();
+        let is_pure = local_manifest.as_ref().is_some_and(|m| m.packages.contains_key(pkg_base));
+        let is_impure = global_manifest.impure.contains_key(pkg_base);
+
+        if !is_pure && !is_impure {
+            anyhow::bail!("Package '{}' is not managed by macdev", pkg);
+        }
+
+        // Run brew upgrade
+        let status = Command::new("brew")
+            .args(["upgrade", pkg])
+            .status()
+            .context("Failed to run 'brew upgrade'")?;
+
+        if !status.success() {
+            anyhow::bail!("Failed to upgrade {}", pkg);
+        }
+
+        // Rebuild profile if pure package
+        if is_pure {
+            println!("  Rebuilding profile...");
+            if let Some(local) = local_manifest {
+                rebuild_profile(&local)?;
+            }
+
+            // Check if Python was upgraded
+            if pkg_base == "python" || pkg.starts_with("python@") {
+                println!();
+                println!("  {} Python was upgraded. You may want to recreate the venv:", "ℹ".cyan());
+                println!("    rm -rf .macdev/venv");
+                println!("    macdev install");
+            }
+        }
+
+        println!("{} Upgraded {}", "✓".green(), pkg);
+
+        // Generate lock file
+        let _ = crate::manifest::generate_lock(); // Ignore errors
+    } else {
+        // Upgrade all managed packages
+        println!("{}", "Upgrading all managed packages...".cyan().bold());
+        println!();
+
+        let mut upgraded_count = 0;
+        let mut python_upgraded = false;
+
+        // Upgrade pure packages
+        if let Some(local) = &local_manifest
+            && !local.packages.is_empty() {
+            println!("{}", "Upgrading pure packages:".green());
+            for (name, version) in &local.packages {
+                let spec = if version == "*" {
+                    name.clone()
+                } else {
+                    format!("{}@{}", name, version)
+                };
+
+                println!("  {} {}", "→".blue(), spec);
+                let output = Command::new("brew")
+                    .args(["upgrade", &spec])
+                    .output();
+
+                if let Ok(output) = output {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    // Check if actually upgraded (not "already installed")
+                    if output.status.success() && !stderr.contains("already installed") {
+                        upgraded_count += 1;
+                        if name == "python" || spec.starts_with("python@") {
+                            python_upgraded = true;
+                        }
+                    }
+                }
+            }
+            println!();
+        }
+
+        // Upgrade impure packages
+        if !global_manifest.impure.is_empty() {
+            println!("{}", "Upgrading impure packages:".cyan());
+            for name in global_manifest.impure.keys() {
+                println!("  {} {}", "→".blue(), name);
+                let output = Command::new("brew")
+                    .args(["upgrade", name])
+                    .output();
+
+                if let Ok(output) = output {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    // Check if actually upgraded (not "already installed")
+                    if output.status.success() && !stderr.contains("already installed") {
+                        upgraded_count += 1;
+                    }
+                }
+            }
+            println!();
+        }
+
+        // Rebuild profile if any pure packages were upgraded
+        if let Some(local) = local_manifest
+            && !local.packages.is_empty() {
+            println!("Rebuilding profile...");
+            rebuild_profile(&local)?;
+        }
+
+        if python_upgraded {
+            println!();
+            println!("  {} Python was upgraded. You may want to recreate the venv:", "ℹ".cyan());
+            println!("    rm -rf .macdev/venv");
+            println!("    macdev install");
+        }
+
+        println!();
+        println!("{} Upgraded {} package(s)", "✓".green(), upgraded_count);
+    }
+
+    // Generate lock file
+    let _ = crate::manifest::generate_lock(); // Ignore errors
+
     Ok(())
 }
 
 /// Install all packages from manifest
 pub fn install() -> Result<()> {
     use colored::*;
+    use crate::manifest::Lock;
 
     let local_manifest = Manifest::load()?;
     let mut global_manifest = Manifest::load_global()?;
 
-    println!("{}", "Installing packages from manifest...".cyan().bold());
+    // Check if lock file exists - if so, use exact versions from lock
+    let lock = if Lock::exists() {
+        println!("{}", "Installing from lock file...".cyan().bold());
+        Some(Lock::load()?)
+    } else {
+        println!("{}", "Installing packages from manifest...".cyan().bold());
+        None
+    };
 
     // Install pure packages from local manifest (no link)
     for (name, version) in &local_manifest.packages {
-        let spec = if version == "*" {
-            name.clone()
+        let spec = if let Some(lock) = &lock {
+            // Use exact version from lock file if available
+            if let Some(locked_pkg) = lock.packages.get(name) {
+                println!("  {} {} (locked: {})", "→".blue(), name, locked_pkg.version);
+                locked_pkg.formula.clone()
+            } else {
+                // Fallback to manifest spec if not in lock
+                if version == "*" {
+                    name.clone()
+                } else {
+                    format!("{}@{}", name, version)
+                }
+            }
         } else {
-            format!("{}@{}", name, version)
+            // No lock file, use manifest spec
+            if version == "*" {
+                name.clone()
+            } else {
+                format!("{}@{}", name, version)
+            }
         };
 
-        println!("  {} {}", "→".blue(), spec);
+        if lock.is_none() {
+            println!("  {} {}", "→".blue(), spec);
+        }
+
         let brew_path = homebrew::ensure_package(&spec, false)?; // link=false
         create_symlinks(&spec, &brew_path)?;
 
@@ -406,6 +576,11 @@ pub fn install() -> Result<()> {
     }
 
     println!("{} All packages installed", "✓".green());
+
+    // Generate lock file if it doesn't exist
+    if lock.is_none() {
+        let _ = crate::manifest::generate_lock(); // Ignore errors
+    }
 
     Ok(())
 }
@@ -442,7 +617,7 @@ fn create_symlinks(package: &str, brew_path: &Path) -> Result<()> {
 }
 
 /// Set up Python virtual environment for isolated package management
-fn setup_python_venv(package: &str) -> Result<()> {
+fn setup_python_venv(_package: &str) -> Result<()> {
     use colored::*;
     use std::process::Command;
 

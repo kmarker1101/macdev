@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use serde::Deserialize;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -189,4 +190,57 @@ pub fn untap(tap_name: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+// JSON structures for brew info response
+#[derive(Debug, Deserialize)]
+struct BrewInfoResponse {
+    formulae: Vec<FormulaInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FormulaInfo {
+    #[serde(default)]
+    full_name: String,
+    versions: VersionInfo,
+}
+
+#[derive(Debug, Deserialize)]
+struct VersionInfo {
+    stable: String,
+}
+
+/// Package information from brew info
+pub struct PackageInfo {
+    pub version: String,
+    pub formula: String,
+}
+
+/// Get package info (version and formula) from Homebrew
+pub fn package_info(package: &str) -> Result<PackageInfo> {
+    let output = Command::new("brew")
+        .args(["info", "--json=v2", package])
+        .output()
+        .context(format!("Failed to get info for {}", package))?;
+
+    if !output.status.success() {
+        anyhow::bail!("Package {} not found", package);
+    }
+
+    let json_str = String::from_utf8(output.stdout)
+        .context("Invalid UTF-8 in brew info output")?;
+
+    let info: BrewInfoResponse = serde_json::from_str(&json_str)
+        .context("Failed to parse brew info JSON")?;
+
+    if info.formulae.is_empty() {
+        anyhow::bail!("No formula information found for {}", package);
+    }
+
+    let formula = &info.formulae[0];
+
+    Ok(PackageInfo {
+        version: formula.versions.stable.clone(),
+        formula: formula.full_name.clone(),
+    })
 }
