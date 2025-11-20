@@ -44,6 +44,18 @@ enum Commands {
 
     /// Garbage collect unused packages
     Gc,
+
+    /// Add a Homebrew tap
+    Tap {
+        /// Tap name (e.g., homebrew/cask)
+        tap: String,
+    },
+
+    /// Remove a Homebrew tap
+    Untap {
+        /// Tap name (e.g., homebrew/cask)
+        tap: String,
+    },
 }
 
 impl Cli {
@@ -71,6 +83,8 @@ impl Cli {
             Commands::List => crate::manifest::list(),
             Commands::Sync => crate::environment::sync(),
             Commands::Gc => crate::environment::gc(),
+            Commands::Tap { tap } => crate::environment::tap(&tap),
+            Commands::Untap { tap } => crate::environment::untap(&tap),
         }
     }
 }

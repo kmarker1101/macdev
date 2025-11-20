@@ -152,6 +152,25 @@ pub fn sync() -> Result<()> {
 
     let mut synced_count = 0;
 
+    // Sync taps from global manifest first (packages may depend on taps)
+    if !global_manifest.taps.is_empty() {
+        println!("{}", "Syncing taps from global manifest:".magenta());
+
+        for tap_name in global_manifest.taps.keys() {
+            match homebrew::is_tap_tapped(tap_name) {
+                Ok(true) => {
+                    println!("  {} {} (already tapped)", "✓".green(), tap_name);
+                }
+                Ok(false) | Err(_) => {
+                    println!("  {} {}", "→".blue(), tap_name);
+                    homebrew::tap(tap_name)?;
+                    synced_count += 1;
+                }
+            }
+        }
+        println!();
+    }
+
     // If in a project, sync pure packages from local manifest
     if let Some(local) = &local_manifest && !local.packages.is_empty() {
         println!("{}", "Syncing pure packages from local manifest:".green());
@@ -196,9 +215,9 @@ pub fn sync() -> Result<()> {
 
     println!();
     if synced_count > 0 {
-        println!("{} Synced {} package(s)", "✓".green(), synced_count);
+        println!("{} Synced {} item(s)", "✓".green(), synced_count);
     } else {
-        println!("{}", "All packages already synced".yellow());
+        println!("{}", "All items already synced".yellow());
     }
 
     Ok(())
@@ -362,6 +381,69 @@ fn rebuild_profile(manifest: &Manifest) -> Result<()> {
             create_symlinks(&spec, &brew_path)?;
         }
     }
+
+    Ok(())
+}
+
+/// Add a Homebrew tap
+pub fn tap(tap_name: &str) -> Result<()> {
+    use colored::*;
+
+    // Check Homebrew is installed
+    if !homebrew::is_installed() {
+        anyhow::bail!("Homebrew is not installed. Install it from https://brew.sh");
+    }
+
+    let mut global_manifest = Manifest::load_global()?;
+
+    // Check if already tapped and tracked
+    if global_manifest.taps.contains_key(tap_name) {
+        println!("{} Tap '{}' is already tracked", "⚠".yellow(), tap_name);
+        return Ok(());
+    }
+
+    println!("{} {}", "Adding tap".green(), tap_name);
+
+    // Add the tap if not already tapped
+    if !homebrew::is_tap_tapped(tap_name)? {
+        homebrew::tap(tap_name)?;
+    } else {
+        println!("  Tap already exists in Homebrew");
+    }
+
+    // Track in global manifest
+    global_manifest.add_tap(tap_name.to_string());
+    global_manifest.save_global()?;
+
+    let path = Manifest::global_manifest_display_path()?;
+    println!("{} Tap added (saved to {})", "✓".green(), path);
+
+    Ok(())
+}
+
+/// Remove a Homebrew tap
+pub fn untap(tap_name: &str) -> Result<()> {
+    use colored::*;
+
+    let mut global_manifest = Manifest::load_global()?;
+
+    // Check if tap exists in manifest
+    if !global_manifest.taps.contains_key(tap_name) {
+        anyhow::bail!("Tap '{}' is not tracked", tap_name);
+    }
+
+    println!("{} {}", "Removing tap".yellow(), tap_name);
+
+    // Remove from Homebrew
+    if homebrew::is_tap_tapped(tap_name)? {
+        homebrew::untap(tap_name)?;
+    }
+
+    // Remove from global manifest
+    global_manifest.remove_tap(tap_name);
+    global_manifest.save_global()?;
+
+    println!("{} Tap removed", "✓".green());
 
     Ok(())
 }

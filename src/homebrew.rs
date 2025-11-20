@@ -139,3 +139,54 @@ pub fn package_deps(package: &str) -> Result<Vec<String>> {
 
     Ok(deps)
 }
+
+/// Check if a tap is already tapped
+pub fn is_tap_tapped(tap: &str) -> Result<bool> {
+    let output = Command::new("brew")
+        .args(["tap"])
+        .output()
+        .context("Failed to run 'brew tap'")?;
+
+    if !output.status.success() {
+        return Ok(false);
+    }
+
+    let taps_output = String::from_utf8(output.stdout)?;
+    Ok(taps_output.lines().any(|line| line.trim() == tap))
+}
+
+/// Add a tap
+pub fn tap(tap_name: &str) -> Result<()> {
+    use colored::*;
+
+    println!("  Tapping {} via Homebrew...", tap_name.cyan());
+
+    let status = Command::new("brew")
+        .args(["tap", tap_name])
+        .status()
+        .context("Failed to run 'brew tap'")?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to tap {}", tap_name);
+    }
+
+    Ok(())
+}
+
+/// Remove a tap
+pub fn untap(tap_name: &str) -> Result<()> {
+    use colored::*;
+
+    println!("  Untapping {} via Homebrew...", tap_name.cyan());
+
+    let status = Command::new("brew")
+        .args(["untap", tap_name])
+        .status()
+        .context("Failed to run 'brew untap'")?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to untap {}", tap_name);
+    }
+
+    Ok(())
+}

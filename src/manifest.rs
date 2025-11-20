@@ -21,6 +21,9 @@ pub struct Manifest {
 
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub gc: HashMap<String, String>,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub taps: HashMap<String, bool>,
 }
 
 impl Manifest {
@@ -91,6 +94,7 @@ impl Manifest {
             packages: self.packages.clone(),
             impure: HashMap::new(),
             gc: HashMap::new(),
+            taps: HashMap::new(),
         };
 
         let contents = toml::to_string_pretty(&local_only)
@@ -110,6 +114,16 @@ impl Manifest {
     /// Add an impure package
     pub fn add_impure(&mut self, name: String) {
         self.impure.insert(name, true);
+    }
+
+    /// Add a tap
+    pub fn add_tap(&mut self, name: String) {
+        self.taps.insert(name, true);
+    }
+
+    /// Remove a tap
+    pub fn remove_tap(&mut self, name: &str) {
+        self.taps.remove(name);
     }
     
     /// Remove a package
@@ -150,15 +164,26 @@ pub fn list() -> Result<()> {
 
     let has_pure = !global_manifest.packages.is_empty();
     let has_impure = !global_manifest.impure.is_empty();
+    let has_taps = !global_manifest.taps.is_empty();
 
-    if !has_pure && !has_impure {
-        println!("{}", "No packages installed".yellow());
+    if !has_pure && !has_impure && !has_taps {
+        println!("{}", "No packages or taps installed".yellow());
         return Ok(());
     }
 
     let path = Manifest::global_manifest_display_path().unwrap_or_else(|_| "global manifest".to_string());
 
+    if !global_manifest.taps.is_empty() {
+        println!("{}", format!("Taps (from {}):", path).magenta().bold());
+        for name in global_manifest.taps.keys() {
+            println!("  {}", name);
+        }
+    }
+
     if !global_manifest.packages.is_empty() {
+        if has_taps {
+            println!();
+        }
         println!("{}", format!("Pure packages (from {}):", path).green().bold());
         for (name, version) in &global_manifest.packages {
             println!("  {}@{}", name, version);
@@ -166,7 +191,7 @@ pub fn list() -> Result<()> {
     }
 
     if !global_manifest.impure.is_empty() {
-        if has_pure {
+        if has_pure || has_taps {
             println!();
         }
         println!("{}", format!("Impure packages (from {}):", path).cyan().bold());
