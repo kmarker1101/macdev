@@ -1,5 +1,9 @@
 # macdev
 
+** The problem:** Different projects need different tool versions, but managing this on macOS is painful. Homebrew doesn't isolate per-project. Nix has a steep learning curve and doesn't play nice with macOS conventions.
+
+** The solution:** Project-isolated development environments on macOS using Homebrew.
+
 Project-isolated development environments on macOS using Homebrew.
 
 macdev provides Nix-like environment isolation without requiring Nix, allowing you to have different versions of tools per project while keeping your system clean.
