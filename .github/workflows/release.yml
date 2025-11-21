@@ -64,7 +64,7 @@ jobs:
           mv macdev-${{ matrix.arch }}-apple-darwin.tar.gz ../../../
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: macdev-${{ matrix.arch }}-apple-darwin
           path: macdev-${{ matrix.arch }}-apple-darwin.tar.gz
@@ -81,7 +81,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
 
       - name: Extract version from tag
         id: version
