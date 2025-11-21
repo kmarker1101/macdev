@@ -23,6 +23,22 @@
 
 ## Installation
 
+### From Release (Recommended)
+
+**Apple Silicon (M1/M2/M3):**
+```bash
+curl -L https://github.com/kmarker1101/macdev/releases/latest/download/macdev-arm64-apple-darwin.tar.gz | tar xz
+sudo mv macdev /usr/local/bin/
+```
+
+**Intel x86_64:**
+```bash
+curl -L https://github.com/kmarker1101/macdev/releases/latest/download/macdev-x86_64-apple-darwin.tar.gz | tar xz
+sudo mv macdev /usr/local/bin/
+```
+
+### From Source
+
 ```bash
 # Clone and build
 git clone https://github.com/kmarker1101/macdev.git
@@ -30,11 +46,15 @@ cd macdev
 cargo build --release
 
 # Install binary
-cp target/release/macdev /usr/local/bin/
+sudo cp target/release/macdev /usr/local/bin/
+```
 
-# (Optional) Set up shell completion
+### Shell Completion (Optional)
+
+```bash
+# For zsh
 macdev completion zsh > ~/.zsh/completions/_macdev
-# See "Shell Completion" section for other shells
+# See "Shell Completion" section below for other shells
 ```
 
 ## Quick Start
