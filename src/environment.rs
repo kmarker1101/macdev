@@ -71,6 +71,12 @@ pub fn add(package_spec: &str, impure: bool, cask: bool) -> Result<()> {
         println!("  Package was in gc, restoring...");
     }
 
+    // For versioned packages, remove the old-style base name entry to avoid duplicates
+    // e.g., when adding python@3.12, remove any existing "python" entry
+    if version.is_some() {
+        global_manifest.packages.remove(&name);
+    }
+
     if impure {
         // Impure: install normally (with linking) and track in global manifest
         println!("{} {} (impure)", "Adding".green(), package);
@@ -221,17 +227,18 @@ pub fn remove(package: &str) -> Result<()> {
         }
 
         // Move from packages to gc in global manifest
-        // Try both full name and base name
-        let version = global_manifest.packages.remove(package)
-                        .or_else(|| global_manifest.packages.remove(package_base));
-        if let Some(ver) = version {
-            // Store full package spec (name@version) in gc, not just base name
-            let gc_key = if ver == "*" {
-                package_base.to_string()
-            } else {
-                format!("{}@{}", package_base, ver)
-            };
-            global_manifest.gc.insert(gc_key, ver);
+        // Try exact match first, then base name
+        let (removed_key, version) = if let Some(ver) = global_manifest.packages.remove(package) {
+            (package.to_string(), ver)
+        } else if let Some(ver) = global_manifest.packages.remove(package_base) {
+            (package_base.to_string(), ver)
+        } else {
+            (String::new(), String::new())
+        };
+
+        if !removed_key.is_empty() {
+            // Use the key that was actually removed from the manifest
+            global_manifest.gc.insert(removed_key, version);
         }
         global_manifest.save_global()?;
 
@@ -704,10 +711,18 @@ fn create_symlinks(package: &str, brew_path: &Path) -> Result<()> {
 
 /// Normalize Python symlinks to ensure python3 and python point to correct version
 fn normalize_python_symlinks(profile_dir: &Path) -> Result<()> {
+    use colored::*;
+
     let bin_dir = profile_dir.join("bin");
 
+    if !bin_dir.exists() {
+        anyhow::bail!("Profile bin directory does not exist");
+    }
+
     // Find the versioned python binary (e.g., python3.12, python3.13)
-    let entries = fs::read_dir(&bin_dir)?;
+    let entries = fs::read_dir(&bin_dir)
+        .context(format!("Failed to read bin directory: {}", bin_dir.display()))?;
+
     let mut versioned_python = None;
 
     for entry in entries {
@@ -715,27 +730,46 @@ fn normalize_python_symlinks(profile_dir: &Path) -> Result<()> {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
-        // Look for python3.X pattern
+        // Look for python3.X pattern (handles both regular files and symlinks)
         if name_str.starts_with("python3.") && !name_str.contains("-config") {
             versioned_python = Some(entry.path());
+            println!("  Found Python binary: {}", name_str);
             break;
         }
     }
 
     if let Some(versioned_path) = versioned_python {
-        // Create python3 symlink
+        // Get just the filename (e.g., "python3.12") for relative symlink
+        let versioned_name = versioned_path.file_name()
+            .ok_or_else(|| anyhow::anyhow!("Could not get filename from Python binary path"))?;
+
+        // Create python3 symlink (relative to same directory)
         let python3_link = bin_dir.join("python3");
         if python3_link.exists() || python3_link.symlink_metadata().is_ok() {
             let _ = fs::remove_file(&python3_link);
         }
-        unix_fs::symlink(&versioned_path, &python3_link)?;
+        unix_fs::symlink(versioned_name, &python3_link)?;
 
-        // Create python symlink
+        // Create python symlink (relative to same directory)
         let python_link = bin_dir.join("python");
         if python_link.exists() || python_link.symlink_metadata().is_ok() {
             let _ = fs::remove_file(&python_link);
         }
-        unix_fs::symlink(&versioned_path, &python_link)?;
+        unix_fs::symlink(versioned_name, &python_link)?;
+
+        println!("  {} Normalized python and python3 symlinks", "✓".green());
+    } else {
+        // List what we found for debugging
+        let entries = fs::read_dir(&bin_dir)?;
+        let files: Vec<_> = entries.filter_map(|e| e.ok()).take(10).collect();
+        let file_names: Vec<_> = files.iter()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+
+        anyhow::bail!(
+            "Could not find versioned Python binary (python3.X) in profile/bin.\nFound files: {:?}",
+            file_names
+        );
     }
 
     Ok(())
