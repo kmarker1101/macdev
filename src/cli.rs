@@ -23,6 +23,10 @@ enum Commands {
         /// Make packages available system-wide (impure)
         #[arg(long)]
         impure: bool,
+
+        /// Install as a cask (GUI application)
+        #[arg(long)]
+        cask: bool,
     },
 
     /// Remove packages from the environment
@@ -44,7 +48,11 @@ enum Commands {
     Sync,
 
     /// Garbage collect unused packages
-    Gc,
+    Gc {
+        /// Remove all pure packages (not just gc section)
+        #[arg(long)]
+        all: bool,
+    },
 
     /// Check if environment needs setup (exits 1 if install needed)
     Check {
@@ -86,9 +94,9 @@ impl Cli {
     pub fn run(self) -> Result<()> {
         match self.command {
             Commands::Init => crate::manifest::init(),
-            Commands::Add { packages, impure } => {
+            Commands::Add { packages, impure, cask } => {
                 for package in &packages {
-                    crate::environment::add(package, impure)?;
+                    crate::environment::add(package, impure, cask)?;
                 }
                 Ok(())
             }
@@ -102,7 +110,7 @@ impl Cli {
             Commands::Shell => crate::shell::enter(),
             Commands::List => crate::manifest::list(),
             Commands::Sync => crate::environment::sync(),
-            Commands::Gc => crate::environment::gc(),
+            Commands::Gc { all } => crate::environment::gc(all),
             Commands::Check { quiet } => crate::environment::check(quiet),
             Commands::Upgrade { package } => crate::environment::upgrade(package.as_deref()),
             Commands::Tap { tap } => crate::environment::tap(&tap),

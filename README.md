@@ -1,6 +1,6 @@
 # macdev
 
-**The problem:** Different projects need different tool versions, but managing this on macOS is painful. Homebrew doesn't isolate per-project. Nix has a steep learning curve and doesn't play nice with macOS conventions.
+**The problem:** I have been using Nix for a couple of years and it has been great. I just wanted to try my hand at building something similar on Mac without having to create yet another package manager. This is the result of Claude and I doing some Vibe coding.
 
 **The solution:** macdev provides Nix-like environment isolation using Homebrew, allowing you to have different versions of tools per project while keeping your system clean.
 
@@ -9,16 +9,19 @@
 - 🔒 **Project isolation** - Each project gets its own isolated environment
 - 📦 **Pure packages** - Installed packages are isolated to `.macdev/profile`
 - 🌍 **Impure packages** - System-wide packages for global tools
+- 🖥️ **Cask support** - Install GUI applications (Chrome, VS Code, etc.)
 - 🔐 **Lock files** - Reproducible environments with exact dependency versions
 - 🗑️ **Garbage collection** - Clean up unused packages automatically
 - 🐍 **Python venvs** - Automatic virtual environment creation for Python projects
+- 🐍 **Multiple Python versions** - Each project can use different Python versions
 - 🚀 **Shell integration** - Works seamlessly with direnv
+- 🔧 **Shell completion** - Tab completion for bash, zsh, fish
 
 ## Installation
 
 ```bash
 # Clone and build
-git clone https://github.com/yourusername/macdev.git
+git clone https://github.com/kmarker1101/macdev.git
 cd macdev
 cargo build --release
 
@@ -88,12 +91,17 @@ node = "*"
 **Global manifest** (`~/.config/macdev/manifest.toml`) - All managed packages:
 ```toml
 [packages]
-python = "3.11"
+python@3.12 = "*"
+python@3.13 = "*"
 rust = "*"
 
 [impure]
 git = true
 emacs = true
+
+[casks]
+google-chrome = true
+visual-studio-code = true
 
 [gc]
 # Packages marked for garbage collection
@@ -146,10 +154,13 @@ macdev add python@3.11 rust node
 # Add impure packages (system-wide)
 macdev add --impure git just direnv
 
+# Add casks (GUI applications, always system-wide)
+macdev add --cask google-chrome visual-studio-code
+
 # Remove packages
 macdev remove python rust
 
-# List all managed packages
+# List all managed packages (shows project packages first if in a project)
 macdev list
 
 # Upgrade packages
@@ -173,8 +184,11 @@ macdev untap homebrew/cask
 ### Cleanup
 
 ```bash
-# Garbage collect unused packages
+# Garbage collect unused packages (packages in gc section)
 macdev gc
+
+# Nuclear option - remove ALL pure packages
+macdev gc --all
 ```
 
 ### Shell Environment
@@ -277,12 +291,45 @@ macdev add python@3.11
 pip install requests django
 ```
 
+**Multiple Python versions:**
+Each project can use different Python versions:
+```bash
+# Project A
+cd project-a
+macdev add python@3.12
+
+# Project B
+cd project-b
+macdev add python@3.13
+
+# Both versions coexist, isolated per project
+```
+
 If Python is upgraded, recreate the venv:
 
 ```bash
 rm -rf .macdev/venv
 macdev install
 ```
+
+## Casks (GUI Applications)
+
+Install GUI applications system-wide:
+
+```bash
+# Add casks
+macdev add --cask google-chrome
+macdev add --cask visual-studio-code
+macdev add --cask docker
+
+# List casks
+macdev list
+
+# Remove casks
+macdev remove google-chrome
+```
+
+**Note:** Casks are always installed system-wide (impure). They can't be project-isolated since they're GUI applications.
 
 ## Common Workflows
 

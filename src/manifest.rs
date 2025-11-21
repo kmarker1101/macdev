@@ -21,6 +21,9 @@ pub struct Manifest {
     pub impure: HashMap<String, bool>,
 
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub casks: HashMap<String, bool>,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub gc: HashMap<String, String>,
 
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -94,6 +97,7 @@ impl Manifest {
         let local_only = Manifest {
             packages: self.packages.clone(),
             impure: HashMap::new(),
+            casks: HashMap::new(),
             gc: HashMap::new(),
             taps: HashMap::new(),
         };
@@ -117,6 +121,16 @@ impl Manifest {
         self.impure.insert(name, true);
     }
 
+    /// Add a cask
+    pub fn add_cask(&mut self, name: String) {
+        self.casks.insert(name, true);
+    }
+
+    /// Remove a cask
+    pub fn remove_cask(&mut self, name: &str) {
+        self.casks.remove(name);
+    }
+
     /// Add a tap
     pub fn add_tap(&mut self, name: String) {
         self.taps.insert(name, true);
@@ -126,11 +140,12 @@ impl Manifest {
     pub fn remove_tap(&mut self, name: &str) {
         self.taps.remove(name);
     }
-    
+
     /// Remove a package
     pub fn remove_package(&mut self, name: &str) {
         self.packages.remove(name);
         self.impure.remove(name);
+        self.casks.remove(name);
     }
     
     /// Check if manifest exists
@@ -161,21 +176,38 @@ pub fn init() -> Result<()> {
 pub fn list() -> Result<()> {
     use colored::*;
 
+    // Try to load local manifest (if in a project)
+    let local_manifest = Manifest::load().ok();
     let global_manifest = Manifest::load_global()?;
 
+    let has_local = local_manifest.as_ref().map_or(false, |m| !m.packages.is_empty());
     let has_pure = !global_manifest.packages.is_empty();
     let has_impure = !global_manifest.impure.is_empty();
+    let has_casks = !global_manifest.casks.is_empty();
     let has_taps = !global_manifest.taps.is_empty();
 
-    if !has_pure && !has_impure && !has_taps {
-        println!("{}", "No packages or taps installed".yellow());
+    if !has_local && !has_pure && !has_impure && !has_casks && !has_taps {
+        println!("{}", "No packages, casks, or taps installed".yellow());
         return Ok(());
     }
 
-    let path = Manifest::global_manifest_display_path().unwrap_or_else(|_| "global manifest".to_string());
+    let global_path = Manifest::global_manifest_display_path().unwrap_or_else(|_| "global manifest".to_string());
+
+    // Show local project packages first (if in a project)
+    if let Some(local) = &local_manifest && !local.packages.is_empty() {
+        println!("{}", "Project packages (from .macdev/manifest.toml):".blue().bold());
+        for (name, version) in &local.packages {
+            if version == "*" {
+                println!("  {}", name);
+            } else {
+                println!("  {}@{}", name, version);
+            }
+        }
+        println!(); // Blank line separator
+    }
 
     if !global_manifest.taps.is_empty() {
-        println!("{}", format!("Taps (from {}):", path).magenta().bold());
+        println!("{}", format!("Taps (from {}):", global_path).magenta().bold());
         for name in global_manifest.taps.keys() {
             println!("  {}", name);
         }
@@ -185,9 +217,15 @@ pub fn list() -> Result<()> {
         if has_taps {
             println!();
         }
-        println!("{}", format!("Pure packages (from {}):", path).green().bold());
+        println!("{}", format!("Pure packages (from {}):", global_path).green().bold());
         for (name, version) in &global_manifest.packages {
-            println!("  {}@{}", name, version);
+            // If the key already contains version (e.g., "python@3.12"), just show the key
+            // Otherwise show key@version (e.g., "rust@*")
+            if name.contains('@') {
+                println!("  {}", name);
+            } else {
+                println!("  {}@{}", name, version);
+            }
         }
     }
 
@@ -195,8 +233,18 @@ pub fn list() -> Result<()> {
         if has_pure || has_taps {
             println!();
         }
-        println!("{}", format!("Impure packages (from {}):", path).cyan().bold());
+        println!("{}", format!("Impure packages (from {}):", global_path).cyan().bold());
         for name in global_manifest.impure.keys() {
+            println!("  {}", name);
+        }
+    }
+
+    if !global_manifest.casks.is_empty() {
+        if has_pure || has_impure || has_taps {
+            println!();
+        }
+        println!("{}", format!("Casks (from {}):", global_path).yellow().bold());
+        for name in global_manifest.casks.keys() {
             println!("  {}", name);
         }
     }
@@ -313,14 +361,21 @@ pub fn generate_lock() -> Result<()> {
     let mut lock = Lock::new();
 
     // Lock all pure packages from this project and their dependencies
-    for name in local_manifest.packages.keys() {
+    for (name, version) in &local_manifest.packages {
+        // Reconstruct package spec (e.g., "python" + "3.12" -> "python@3.12")
+        let spec = if version == "*" {
+            name.clone()
+        } else {
+            format!("{}@{}", name, version)
+        };
+
         // Get package info
-        let info = homebrew::package_info(name)?;
+        let info = homebrew::package_info(&spec)?;
         lock.add_package(name.clone(), info.version.clone(), info.formula);
         println!("    Locked {} @ {}", name, info.version);
 
         // Get and lock dependencies
-        let deps = homebrew::package_deps(name)?;
+        let deps = homebrew::package_deps(&spec)?;
         if !deps.is_empty() {
             println!("      Locking {} dependencies...", deps.len());
             for dep in deps {

@@ -21,10 +21,30 @@ pub fn parse_package_spec(spec: &str) -> (String, Option<String>) {
 }
 
 /// Add a package to the environment
-pub fn add(package_spec: &str, impure: bool) -> Result<()> {
+pub fn add(package_spec: &str, impure: bool, cask: bool) -> Result<()> {
     // Check Homebrew is installed
     if !homebrew::is_installed() {
         anyhow::bail!("Homebrew is not installed. Install it from https://brew.sh");
+    }
+
+    // Handle casks separately (they're always system-wide)
+    if cask {
+        if !impure {
+            println!("{} Casks are always installed system-wide (impure)", "Note:".yellow());
+        }
+
+        let mut global_manifest = Manifest::load_global()?;
+
+        println!("{} {} (cask)", "Adding".green(), package_spec);
+        homebrew::ensure_cask(package_spec)?;
+
+        global_manifest.add_cask(package_spec.to_string());
+        global_manifest.save_global()?;
+
+        let path = Manifest::global_manifest_display_path()?;
+        println!("{} Cask installed system-wide (saved to {})", "✓".green(), path);
+
+        return Ok(());
     }
 
     // For pure packages, check that manifest exists BEFORE installing anything
@@ -35,7 +55,15 @@ pub fn add(package_spec: &str, impure: bool) -> Result<()> {
     let (package, version) = parse_package_spec(package_spec);
 
     let mut global_manifest = Manifest::load_global()?;
+
+    // For versioned packages, use full spec as key with "*" as value
+    // For unversioned packages, use base name as key with version as value
     let name = package.split('@').next().unwrap().to_string();
+    let (manifest_key, manifest_value) = if version.is_some() {
+        (package.clone(), "*".to_string()) // "python@3.13" -> "*"
+    } else {
+        (name.clone(), "*".to_string()) // "rust" -> "*"
+    };
 
     // Check if package is in gc section and remove it
     let was_in_gc = global_manifest.gc.remove(&name).is_some();
@@ -48,7 +76,7 @@ pub fn add(package_spec: &str, impure: bool) -> Result<()> {
         println!("{} {} (impure)", "Adding".green(), package);
         homebrew::ensure_package(&package, true)?; // link=true
 
-        global_manifest.add_impure(name);
+        global_manifest.add_impure(manifest_key);
         global_manifest.save_global()?;
 
         let path = Manifest::global_manifest_display_path()?;
@@ -69,7 +97,7 @@ pub fn add(package_spec: &str, impure: bool) -> Result<()> {
         local_manifest.save()?;
 
         // Track in global manifest (it's installed in Homebrew)
-        global_manifest.add_package(name, ver);
+        global_manifest.add_package(manifest_key, manifest_value);
         global_manifest.save_global()?;
 
         println!("{} Package isolated to this project", "✓".green());
@@ -114,6 +142,21 @@ pub fn remove(package: &str) -> Result<()> {
     // Try to load local manifest (ok if it doesn't exist - not in a project)
     let local_manifest = Manifest::load().ok();
     let mut global_manifest = Manifest::load_global()?;
+
+    // Check if it's a cask first
+    if global_manifest.casks.contains_key(package) {
+        println!("{} {} from environment", "Removing".yellow(), package);
+        global_manifest.casks.remove(package);
+        global_manifest.save_global()?;
+
+        println!("{} Cask {} removed (moved to gc)", "✓".green(), package);
+
+        // Move to gc for actual uninstall
+        global_manifest.gc.insert(package.to_string(), "*".to_string());
+        global_manifest.save_global()?;
+
+        return Ok(());
+    }
 
     // Determine which section the package is in (prioritize specific matches)
     let has_version = package.contains('@');
@@ -246,7 +289,7 @@ pub fn sync() -> Result<()> {
                 };
 
                 println!("  {} {}", "→".blue(), spec);
-                add(&spec, false)?;
+                add(&spec, false, false)?; // impure=false, cask=false
                 synced_count += 1;
             } else {
                 println!("  {} {} (already installed)", "✓".green(), name);
@@ -267,7 +310,7 @@ pub fn sync() -> Result<()> {
                 }
                 Ok(false) | Err(_) => {
                     println!("  {} {}", "→".blue(), name);
-                    add(name, true)?;
+                    add(name, true, false)?; // impure=true, cask=false
                     synced_count += 1;
                 }
             }
@@ -330,12 +373,20 @@ pub fn check(quiet: bool) -> Result<()> {
 }
 
 /// Garbage collect packages marked for removal
-pub fn gc() -> Result<()> {
+pub fn gc(all: bool) -> Result<()> {
     use colored::*;
 
     let mut global_manifest = Manifest::load_global()?;
 
-    if global_manifest.gc.is_empty() {
+    let has_gc = !global_manifest.gc.is_empty();
+    let has_pure = !global_manifest.packages.is_empty();
+
+    if !has_gc && !has_pure {
+        println!("{}", "No packages to garbage collect".yellow());
+        return Ok(());
+    }
+
+    if !has_gc && !all {
         println!("{}", "No packages to garbage collect".yellow());
         return Ok(());
     }
@@ -345,10 +396,18 @@ pub fn gc() -> Result<()> {
 
     let mut to_remove = Vec::new();
 
+    // Uninstall packages in gc section
     for name in global_manifest.gc.keys() {
         println!("  {} {}", "Uninstalling".red(), name);
 
-        match homebrew::uninstall_package(name) {
+        // Try as cask first, then as regular package
+        let result = if homebrew::is_cask_installed(name).unwrap_or(false) {
+            homebrew::uninstall_cask(name)
+        } else {
+            homebrew::uninstall_package(name)
+        };
+
+        match result {
             Ok(_) => {
                 to_remove.push(name.clone());
             }
@@ -362,6 +421,26 @@ pub fn gc() -> Result<()> {
     // Remove successfully uninstalled packages from gc
     for name in &to_remove {
         global_manifest.gc.remove(name);
+    }
+
+    // If --all flag is set, also uninstall all pure packages
+    if all {
+        println!();
+        println!("{}", "Removing all pure packages...".cyan());
+
+        let pure_packages: Vec<String> = global_manifest.packages.keys().cloned().collect();
+        for name in pure_packages {
+            println!("  {} {}", "Uninstalling".red(), name);
+
+            match homebrew::uninstall_package(&name) {
+                Ok(_) => {
+                    global_manifest.packages.remove(&name);
+                }
+                Err(e) => {
+                    println!("    {} Failed to uninstall: {}", "⚠".yellow(), e);
+                }
+            }
+        }
     }
 
     global_manifest.save_global()?;
@@ -567,7 +646,13 @@ pub fn install() -> Result<()> {
         create_symlinks(&spec, &brew_path)?;
 
         // Track in global manifest (it's now installed in Homebrew)
-        global_manifest.add_package(name.clone(), version.clone());
+        // Use full spec as key for versioned packages, with "*" as value
+        let manifest_key = if version == "*" {
+            name.clone()
+        } else {
+            format!("{}@{}", name, version)
+        };
+        global_manifest.add_package(manifest_key, "*".to_string());
     }
 
     // Save global manifest with newly installed pure packages
@@ -608,9 +693,49 @@ fn create_symlinks(package: &str, brew_path: &Path) -> Result<()> {
         link_directory(&brew_lib, &profile_dir.join("lib"))?;
     }
 
-    // Special handling for Python: create virtual environment
+    // Special handling for Python: normalize symlinks and create venv
     if package.starts_with("python") {
+        normalize_python_symlinks(&profile_dir)?;
         setup_python_venv(package)?;
+    }
+
+    Ok(())
+}
+
+/// Normalize Python symlinks to ensure python3 and python point to correct version
+fn normalize_python_symlinks(profile_dir: &Path) -> Result<()> {
+    let bin_dir = profile_dir.join("bin");
+
+    // Find the versioned python binary (e.g., python3.12, python3.13)
+    let entries = fs::read_dir(&bin_dir)?;
+    let mut versioned_python = None;
+
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        // Look for python3.X pattern
+        if name_str.starts_with("python3.") && !name_str.contains("-config") {
+            versioned_python = Some(entry.path());
+            break;
+        }
+    }
+
+    if let Some(versioned_path) = versioned_python {
+        // Create python3 symlink
+        let python3_link = bin_dir.join("python3");
+        if python3_link.exists() || python3_link.symlink_metadata().is_ok() {
+            let _ = fs::remove_file(&python3_link);
+        }
+        unix_fs::symlink(&versioned_path, &python3_link)?;
+
+        // Create python symlink
+        let python_link = bin_dir.join("python");
+        if python_link.exists() || python_link.symlink_metadata().is_ok() {
+            let _ = fs::remove_file(&python_link);
+        }
+        unix_fs::symlink(&versioned_path, &python_link)?;
     }
 
     Ok(())

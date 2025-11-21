@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Apple Silicon (M1/M2/M3)
+          - os: macos-14
+            target: aarch64-apple-darwin
+            arch: arm64
+          # Intel x86_64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            arch: x86_64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache target directory
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-target-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Run tests
+        run: cargo test --release --target ${{ matrix.target }}
+
+      - name: Strip binary
+        run: strip target/${{ matrix.target }}/release/macdev
+
+      - name: Create archive
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf macdev-${{ matrix.arch }}-apple-darwin.tar.gz macdev
+          mv macdev-${{ matrix.arch }}-apple-darwin.tar.gz ../../../
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: macdev-${{ matrix.arch }}-apple-darwin
+          path: macdev-${{ matrix.arch }}-apple-darwin.tar.gz
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          files: |
+            macdev-arm64-apple-darwin/macdev-arm64-apple-darwin.tar.gz
+            macdev-x86_64-apple-darwin/macdev-x86_64-apple-darwin.tar.gz
+          body: |
+            ## macdev ${{ steps.version.outputs.VERSION }}
+
+            Project-isolated development environments on macOS using Homebrew.
+
+            ### Installation
+
+            **Apple Silicon (M1/M2/M3):**
+            ```bash
+            curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/macdev-arm64-apple-darwin.tar.gz | tar xz
+            mv macdev /usr/local/bin/
+            ```
+
+            **Intel x86_64:**
+            ```bash
+            curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/macdev-x86_64-apple-darwin.tar.gz | tar xz
+            mv macdev /usr/local/bin/
+            ```
+
+            ### What's New
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ steps.version.outputs.VERSION }}/CHANGELOG.md) for details.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

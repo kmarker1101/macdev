@@ -192,6 +192,56 @@ pub fn untap(tap_name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Check if a cask is installed
+pub fn is_cask_installed(cask: &str) -> Result<bool> {
+    let output = Command::new("brew")
+        .args(["list", "--cask", cask])
+        .output()?;
+
+    Ok(output.status.success())
+}
+
+/// Install a cask
+pub fn install_cask(cask: &str) -> Result<()> {
+    use colored::*;
+
+    println!("  Installing {} (cask) via Homebrew...", cask.cyan());
+
+    let status = Command::new("brew")
+        .args(["install", "--cask", cask])
+        .status()
+        .context("Failed to run 'brew install --cask'")?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to install cask {}", cask);
+    }
+
+    Ok(())
+}
+
+/// Uninstall a cask
+pub fn uninstall_cask(cask: &str) -> Result<()> {
+    let output = Command::new("brew")
+        .args(["uninstall", "--cask", cask])
+        .output()
+        .context("Failed to run 'brew uninstall --cask'")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("{}", stderr.trim());
+    }
+
+    Ok(())
+}
+
+/// Ensure a cask is installed (install if needed)
+pub fn ensure_cask(cask: &str) -> Result<()> {
+    if !is_cask_installed(cask)? {
+        install_cask(cask)?;
+    }
+    Ok(())
+}
+
 // JSON structures for brew info response
 #[derive(Debug, Deserialize)]
 struct BrewInfoResponse {
