@@ -4,6 +4,9 @@
 
 **The solution:** macdev provides Nix-like environment isolation using Homebrew, allowing you to have different versions of tools per project while keeping your system clean.
 
+## Status
+**Alpha software.** I built this for my own consulting work and it's been fairly solid for me. That said, expect rough edges and breaking changes.
+
 ## Demo
 
 [![asciicast](https://asciinema.org/a/osBgT3woq3wepUL4ORatFxnlV.svg)](https://asciinema.org/a/osBgT3woq3wepUL4ORatFxnlV)
