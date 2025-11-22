@@ -6,72 +6,29 @@ on:
       - 'v*'
 
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          # Apple Silicon (M1/M2/M3)
-          - os: macos-14
-            target: aarch64-apple-darwin
-            arch: arm64
-          # Intel x86_64
-          - os: macos-13
-            target: x86_64-apple-darwin
-            arch: x86_64
+  test:
+    name: Run Tests
+    runs-on: macos-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
         with:
-          targets: ${{ matrix.target }}
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache target directory
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-target-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+          ruby-version: '3.4'
+          bundler-cache: true
 
       - name: Run tests
-        run: cargo test --release --target ${{ matrix.target }}
+        run: bundle exec rspec
 
-      - name: Strip binary
-        run: strip target/${{ matrix.target }}/release/macdev
-
-      - name: Create archive
-        run: |
-          cd target/${{ matrix.target }}/release
-          tar czf macdev-${{ matrix.arch }}-apple-darwin.tar.gz macdev
-          mv macdev-${{ matrix.arch }}-apple-darwin.tar.gz ../../../
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macdev-${{ matrix.arch }}-apple-darwin
-          path: macdev-${{ matrix.arch }}-apple-darwin.tar.gz
+      - name: Run rubocop
+        run: bundle exec rubocop
 
   release:
     name: Create Release
-    needs: build
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -80,12 +37,34 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-
       - name: Extract version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Get tarball SHA256
+        id: sha
+        run: |
+          # Download the auto-generated source tarball
+          wget https://github.com/${{ github.repository }}/archive/refs/tags/${{ steps.version.outputs.VERSION }}.tar.gz
+          SHA256=$(shasum -a 256 ${{ steps.version.outputs.VERSION }}.tar.gz | cut -d ' ' -f 1)
+          echo "SHA256=$SHA256" >> $GITHUB_OUTPUT
+          echo "Tarball SHA256: $SHA256"
+
+      - name: Update formula
+        run: |
+          # Update SHA256 in formula
+          sed -i 's/sha256 ""/sha256 "'${{ steps.sha.outputs.SHA256 }}'"/' Formula/macdev.rb
+
+          # Update version in formula URL
+          sed -i 's|archive/refs/tags/v.*\.tar\.gz|archive/refs/tags/${{ steps.version.outputs.VERSION }}.tar.gz|' Formula/macdev.rb
+
+      - name: Commit formula update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/macdev.rb
+          git commit -m "Update formula for ${{ steps.version.outputs.VERSION }}"
+          git push origin HEAD:main
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -93,29 +72,30 @@ jobs:
           name: Release ${{ steps.version.outputs.VERSION }}
           draft: false
           prerelease: false
-          files: |
-            macdev-arm64-apple-darwin/macdev-arm64-apple-darwin.tar.gz
-            macdev-x86_64-apple-darwin/macdev-x86_64-apple-darwin.tar.gz
+          generate_release_notes: true
           body: |
             ## macdev ${{ steps.version.outputs.VERSION }}
 
             Project-isolated development environments on macOS using Homebrew.
 
-            ### Installation
+            ### Installation via Homebrew
 
-            **Apple Silicon (M1/M2/M3):**
             ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/macdev-arm64-apple-darwin.tar.gz | tar xz
-            mv macdev /usr/local/bin/
+            brew tap kmarker/macdev
+            brew install macdev
             ```
 
-            **Intel x86_64:**
+            ### Manual Installation
+
             ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/macdev-x86_64-apple-darwin.tar.gz | tar xz
-            mv macdev /usr/local/bin/
+            gem install macdev
             ```
 
-            ### What's New
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ steps.version.outputs.VERSION }}/CHANGELOG.md) for details.
+            ### Formula SHA256
+
+            For Homebrew formula maintainers:
+            ```
+            sha256 "${{ steps.sha.outputs.SHA256 }}"
+            ```
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

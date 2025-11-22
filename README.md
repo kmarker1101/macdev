@@ -26,38 +26,19 @@
 
 ## Installation
 
-### From Release (Recommended)
+### Via Homebrew (Recommended)
 
-**Apple Silicon (M1/M2/M3):**
 ```bash
-curl -L https://github.com/kmarker1101/macdev/releases/latest/download/macdev-arm64-apple-darwin.tar.gz | tar xz
-sudo mv macdev /usr/local/bin/
+brew tap kmarker/macdev
+brew install macdev
 ```
 
-**Intel x86_64:**
-```bash
-curl -L https://github.com/kmarker1101/macdev/releases/latest/download/macdev-x86_64-apple-darwin.tar.gz | tar xz
-sudo mv macdev /usr/local/bin/
-```
+Shell completions are installed automatically via Homebrew.
 
-### From Source
+### Manual Installation
 
 ```bash
-# Clone and build
-git clone https://github.com/kmarker1101/macdev.git
-cd macdev
-cargo build --release
-
-# Install binary
-sudo cp target/release/macdev /usr/local/bin/
-```
-
-### Shell Completion (Optional)
-
-```bash
-# For zsh
-macdev completion zsh > ~/.zsh/completions/_macdev
-# See "Shell Completion" section below for other shells
+gem install macdev
 ```
 
 ## Quick Start
@@ -89,7 +70,7 @@ direnv allow
 - Installed without linking to system
 - Symlinked to `.macdev/profile/`
 - Only available when in project directory or using `macdev shell`
-- Tracked in local manifest (`.macdev/manifest.toml`)
+- Tracked in local manifest (`macdev.toml`)
 
 **Impure packages** are installed system-wide:
 - Installed normally via Homebrew
@@ -107,7 +88,7 @@ macdev add --impure git emacs
 
 ### Manifests
 
-**Local manifest** (`.macdev/manifest.toml`) - Project-specific packages:
+**Local manifest** (`macdev.toml`) - Project-specific packages:
 ```toml
 [packages]
 python = "3.11"
@@ -115,11 +96,10 @@ rust = "*"
 node = "*"
 ```
 
-**Global manifest** (`~/.config/macdev/manifest.toml`) - All managed packages:
+**Global manifest** (`~/.config/macdev/macdev.toml`) - All managed packages:
 ```toml
 [packages]
-python@3.12 = "*"
-python@3.13 = "*"
+python = "3.13"
 rust = "*"
 
 [impure]
@@ -136,7 +116,7 @@ visual-studio-code = true
 
 ### Lock Files
 
-Lock files (`.macdev/manifest.lock`) ensure reproducible environments:
+Lock files (`macdev.lock`) ensure reproducible environments:
 - Records exact versions of all packages and dependencies
 - Generated automatically on install/add/upgrade
 - Should be committed to version control
@@ -375,7 +355,7 @@ direnv allow
 ```bash
 git clone https://github.com/team/project
 cd project
-macdev install  # Installs from manifest.lock
+macdev install  # Installs from macdev.lock
 direnv allow
 ```
 
@@ -386,7 +366,7 @@ direnv allow
 macdev upgrade
 
 # Regenerate lock file with new versions
-git add .macdev/manifest.lock
+git add macdev.lock
 git commit -m "Upgrade dependencies"
 ```
 
@@ -413,16 +393,17 @@ Dependencies are automatically unlinked if they're not explicitly managed, preve
 ## Files & Directories
 
 ```
-.macdev/
-├── manifest.toml      # Local packages (project-specific)
-├── manifest.lock      # Lock file (exact versions)
-├── profile/           # Symlinks to package binaries
-│   ├── bin/
-│   └── lib/
-└── venv/              # Python virtual environment (if applicable)
+project/
+├── macdev.toml        # Local packages (project-specific)
+├── macdev.lock        # Lock file (exact versions)
+└── .macdev/
+    ├── profile/       # Symlinks to package binaries
+    │   ├── bin/
+    │   └── lib/
+    └── venv/          # Python virtual environment (if applicable)
 
 ~/.config/macdev/
-└── manifest.toml      # Global manifest (all managed packages)
+└── macdev.toml        # Global manifest (all managed packages)
 ```
 
 ## FAQ
