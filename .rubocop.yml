@@ -26,6 +26,10 @@ Metrics/PerceivedComplexity:
 Metrics/ParameterLists:
   Max: 6
 
+Metrics/BlockLength:
+  Exclude:
+    - 'spec/**/*_spec.rb'
+
 # Boolean flags are common and acceptable for simple CLI flags
 Style/OptionalBooleanParameter:
   Enabled: false

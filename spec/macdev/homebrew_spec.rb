@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'English'
 require 'spec_helper'
 require 'json'
 
@@ -35,21 +36,21 @@ RSpec.describe Macdev::Homebrew do
   describe '.prefix' do
     it 'returns package prefix path' do
       allow(described_class).to receive(:`).and_return("/opt/homebrew/opt/rust\n")
-      allow($?).to receive(:exitstatus).and_return(0)
+      allow($CHILD_STATUS).to receive(:exitstatus).and_return(0)
 
       expect(described_class.prefix('rust')).to eq('/opt/homebrew/opt/rust')
     end
 
     it 'returns nil when package not found' do
       allow(described_class).to receive(:`).and_return('')
-      allow($?).to receive(:exitstatus).and_return(1)
+      allow($CHILD_STATUS).to receive(:exitstatus).and_return(1)
 
       expect(described_class.prefix('nonexistent')).to be_nil
     end
 
     it 'returns nil when output is empty' do
       allow(described_class).to receive(:`).and_return('')
-      allow($?).to receive(:exitstatus).and_return(0)
+      allow($CHILD_STATUS).to receive(:exitstatus).and_return(0)
 
       expect(described_class.prefix('package')).to be_nil
     end
@@ -69,7 +70,7 @@ RSpec.describe Macdev::Homebrew do
 
     it 'returns package info' do
       allow(described_class).to receive(:`).and_return(brew_info_json)
-      allow($?).to receive(:exitstatus).and_return(0)
+      allow($CHILD_STATUS).to receive(:exitstatus).and_return(0)
 
       info = described_class.package_info('rust')
 
@@ -79,14 +80,14 @@ RSpec.describe Macdev::Homebrew do
 
     it 'returns nil when package not found' do
       allow(described_class).to receive(:`).and_return('')
-      allow($?).to receive(:exitstatus).and_return(1)
+      allow($CHILD_STATUS).to receive(:exitstatus).and_return(1)
 
       expect(described_class.package_info('nonexistent')).to be_nil
     end
 
     it 'returns nil when JSON is invalid' do
       allow(described_class).to receive(:`).and_return('invalid json')
-      allow($?).to receive(:exitstatus).and_return(0)
+      allow($CHILD_STATUS).to receive(:exitstatus).and_return(0)
 
       expect(described_class.package_info('package')).to be_nil
     end
@@ -95,7 +96,7 @@ RSpec.describe Macdev::Homebrew do
   describe '.package_deps' do
     it 'returns list of dependencies' do
       allow(described_class).to receive(:`).and_return("openssl\nzlib\n")
-      allow($?).to receive(:exitstatus).and_return(0)
+      allow($CHILD_STATUS).to receive(:exitstatus).and_return(0)
 
       deps = described_class.package_deps('rust')
 
@@ -104,7 +105,7 @@ RSpec.describe Macdev::Homebrew do
 
     it 'returns empty array when no dependencies' do
       allow(described_class).to receive(:`).and_return('')
-      allow($?).to receive(:exitstatus).and_return(0)
+      allow($CHILD_STATUS).to receive(:exitstatus).and_return(0)
 
       deps = described_class.package_deps('simple-package')
 
@@ -113,7 +114,7 @@ RSpec.describe Macdev::Homebrew do
 
     it 'returns empty array when command fails' do
       allow(described_class).to receive(:`).and_return('')
-      allow($?).to receive(:exitstatus).and_return(1)
+      allow($CHILD_STATUS).to receive(:exitstatus).and_return(1)
 
       deps = described_class.package_deps('nonexistent')
 

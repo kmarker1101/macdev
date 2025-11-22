@@ -41,11 +41,11 @@ RSpec.describe Macdev::Lock do
       lock.add_package('rust', '1.75.0', 'rust')
 
       expect(lock.packages).to eq({
-        'rust' => {
-          'version' => '1.75.0',
-          'formula' => 'rust'
-        }
-      })
+                                    'rust' => {
+                                      'version' => '1.75.0',
+                                      'formula' => 'rust'
+                                    }
+                                  })
     end
 
     it 'adds multiple packages' do
@@ -63,11 +63,11 @@ RSpec.describe Macdev::Lock do
       lock.add_dependency('rust', 'openssl', '3.2.0', 'openssl@3')
 
       expect(lock.dependencies).to eq({
-        'rust:openssl' => {
-          'version' => '3.2.0',
-          'formula' => 'openssl@3'
-        }
-      })
+                                        'rust:openssl' => {
+                                          'version' => '3.2.0',
+                                          'formula' => 'openssl@3'
+                                        }
+                                      })
     end
 
     it 'adds multiple dependencies for same package' do

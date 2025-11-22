@@ -34,7 +34,7 @@ RSpec.describe Macdev::CLI do
         expect(Macdev::Environment).to receive(:add).with('rust', impure: nil, cask: nil)
         expect(Macdev::Environment).to receive(:add).with('node', impure: nil, cask: nil)
 
-        described_class.run(['add', 'rust', 'node'])
+        described_class.run(%w[add rust node])
       end
 
       it 'passes impure flag correctly' do
@@ -73,7 +73,7 @@ RSpec.describe Macdev::CLI do
         expect(Macdev::Environment).to receive(:remove).with('rust')
         expect(Macdev::Environment).to receive(:remove).with('node')
 
-        described_class.run(['remove', 'rust', 'node'])
+        described_class.run(%w[remove rust node])
       end
 
       it 'aborts when no packages specified' do
@@ -137,7 +137,7 @@ RSpec.describe Macdev::CLI do
       it 'calls Environment.upgrade with specific package' do
         expect(Macdev::Environment).to receive(:upgrade).with('rust')
 
-        described_class.run(['upgrade', 'rust'])
+        described_class.run(%w[upgrade rust])
       end
     end
 
@@ -189,7 +189,7 @@ RSpec.describe Macdev::CLI do
       it 'calls Completion.generate with shell name' do
         expect(Macdev::Completion).to receive(:generate).with('bash')
 
-        described_class.run(['completion', 'bash'])
+        described_class.run(%w[completion bash])
       end
 
       it 'aborts when no shell specified' do

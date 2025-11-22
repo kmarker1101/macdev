@@ -322,7 +322,7 @@ module Macdev
         puts "\e[32m✓\e[0m Cask installed system-wide (saved to #{global_path})"
       end
 
-      def build_manifest_keys(package, version, name)
+      def build_manifest_keys(_package, version, name)
         if version
           [name, version]
         else
@@ -706,56 +706,50 @@ module Macdev
 
       def normalize_python_symlinks
         bin_dir = '.macdev/profile/bin'
+        return warn 'Profile bin directory does not exist' unless Dir.exist?(bin_dir)
 
-        unless Dir.exist?(bin_dir)
-          warn 'Profile bin directory does not exist'
-          return
-        end
+        versioned_name = find_versioned_python_binary(bin_dir)
+        return unless versioned_name
 
-        # Find the versioned python binary (e.g., python3.12, python3.13)
+        puts "  Found Python binary: #{versioned_name}"
+
+        create_symlink_in_dir(bin_dir, 'python3', versioned_name)
+        create_symlink_in_dir(bin_dir, 'python', versioned_name)
+        normalize_pip_symlinks(bin_dir, versioned_name)
+
+        puts "  \e[32m✓\e[0m Normalized python and pip symlinks"
+      end
+
+      def find_versioned_python_binary(bin_dir)
         versioned_python = Dir.glob(File.join(bin_dir, 'python3.*')).find do |path|
           basename = File.basename(path)
           basename.start_with?('python3.') && !basename.include?('-config')
         end
 
-        unless versioned_python
+        if versioned_python
+          File.basename(versioned_python)
+        else
           warn 'Could not find versioned Python binary (python3.X) in profile/bin'
-          return
+          nil
         end
+      end
 
-        versioned_name = File.basename(versioned_python)
-        puts "  Found Python binary: #{versioned_name}"
+      def create_symlink_in_dir(dir, link_name, target)
+        link_path = File.join(dir, link_name)
+        File.delete(link_path) if File.exist?(link_path) || File.symlink?(link_path)
+        File.symlink(target, link_path)
+      end
 
-        # Create python3 symlink (relative to same directory)
-        python3_link = File.join(bin_dir, 'python3')
-        File.delete(python3_link) if File.exist?(python3_link) || File.symlink?(python3_link)
-        File.symlink(versioned_name, python3_link)
+      def normalize_pip_symlinks(bin_dir, versioned_python)
+        version_match = versioned_python.match(/python3\.(\d+)/)
+        return unless version_match
 
-        # Create python symlink (relative to same directory)
-        python_link = File.join(bin_dir, 'python')
-        File.delete(python_link) if File.exist?(python_link) || File.symlink?(python_link)
-        File.symlink(versioned_name, python_link)
+        pip_version = "pip3.#{version_match[1]}"
+        versioned_pip = File.join(bin_dir, pip_version)
+        return unless File.exist?(versioned_pip)
 
-        # Also normalize pip symlinks if they exist
-        version_match = versioned_name.match(/python3\.(\d+)/)
-        if version_match
-          pip_version = "pip3.#{version_match[1]}"
-          versioned_pip = File.join(bin_dir, pip_version)
-
-          if File.exist?(versioned_pip)
-            # Create pip3 symlink
-            pip3_link = File.join(bin_dir, 'pip3')
-            File.delete(pip3_link) if File.exist?(pip3_link) || File.symlink?(pip3_link)
-            File.symlink(pip_version, pip3_link)
-
-            # Create pip symlink
-            pip_link = File.join(bin_dir, 'pip')
-            File.delete(pip_link) if File.exist?(pip_link) || File.symlink?(pip_link)
-            File.symlink(pip_version, pip_link)
-          end
-        end
-
-        puts "  \e[32m✓\e[0m Normalized python and pip symlinks"
+        create_symlink_in_dir(bin_dir, 'pip3', pip_version)
+        create_symlink_in_dir(bin_dir, 'pip', pip_version)
       end
 
       def setup_python_venv

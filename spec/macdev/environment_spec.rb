@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'English'
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
@@ -914,7 +915,7 @@ RSpec.describe Macdev::Environment do
 
         # Mock brew upgrade commands via backticks
         allow(described_class).to receive(:`).and_return('Upgrading rust')
-        allow($?).to receive(:exitstatus).and_return(0)
+        allow($CHILD_STATUS).to receive(:exitstatus).and_return(0)
       end
 
       it 'upgrades all pure packages' do
@@ -962,7 +963,7 @@ RSpec.describe Macdev::Environment do
 
       it 'shows venv recreation message for upgrade all' do
         allow(described_class).to receive(:`).and_return('Upgrading python')
-        allow($?).to receive(:exitstatus).and_return(0)
+        allow($CHILD_STATUS).to receive(:exitstatus).and_return(0)
 
         expect do
           described_class.upgrade
@@ -980,7 +981,7 @@ RSpec.describe Macdev::Environment do
 
         # Mock brew output indicating already installed
         allow(described_class).to receive(:`).and_return('rust 1.75.0 is already installed')
-        allow($?).to receive(:exitstatus).and_return(0)
+        allow($CHILD_STATUS).to receive(:exitstatus).and_return(0)
       end
 
       it 'still rebuilds profile' do
@@ -1005,7 +1006,7 @@ RSpec.describe Macdev::Environment do
         global.save(global_manifest_file)
 
         allow(described_class).to receive(:`).and_return('Upgrading git')
-        allow($?).to receive(:exitstatus).and_return(0)
+        allow($CHILD_STATUS).to receive(:exitstatus).and_return(0)
       end
 
       it 'only upgrades impure packages' do
