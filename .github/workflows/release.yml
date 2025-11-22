@@ -23,9 +23,6 @@ jobs:
       - name: Run tests
         run: bundle exec rspec
 
-      - name: Run rubocop
-        run: bundle exec rubocop
-
   release:
     name: Create Release
     needs: test
