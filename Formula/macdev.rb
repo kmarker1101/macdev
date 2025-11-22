@@ -3,7 +3,7 @@
 class Macdev < Formula
   desc 'Project-isolated development environments on macOS using Homebrew'
   homepage 'https://github.com/kmarker/macdev'
-  url 'https://github.com/kmarker/macdev/archive/refs/tags/v0.1.0.tar.gz'
+  url 'https://github.com/kmarker/macdev/archive/refs/tags/v0.2.0.tar.gz'
   sha256 '' # TODO: Update with actual SHA256 after creating release
   license 'MIT'
   head 'https://github.com/kmarker/macdev.git', branch: 'main'
