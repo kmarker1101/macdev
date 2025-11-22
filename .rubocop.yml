@@ -1,6 +1,8 @@
 AllCops:
   NewCops: enable
   TargetRubyVersion: 3.4
+  Exclude:
+    - 'Formula/**/*'
 
 # CLI tools have inherently complex command routing and operations
 # These limits are relaxed from defaults but still maintain code quality
