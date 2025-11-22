@@ -29,7 +29,7 @@
 ### Via Homebrew (Recommended)
 
 ```bash
-brew tap kmarker/macdev
+brew tap kmarker1101/macdev
 brew install macdev
 ```
 
